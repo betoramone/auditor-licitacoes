@@ -2,7 +2,8 @@ import streamlit as st
 from google import genai
 from google.genai import types
 import streamlit.components.v1 as components
-from datetime import date
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 # Configuração da página
 st.set_page_config(page_title="Auditor de Credenciamento", page_icon="⚖️", layout="wide")
@@ -14,7 +15,12 @@ st.markdown("Faça o upload do **Edital** e de **um ou mais PDFs da Empresa** pa
 with st.sidebar:
     st.header("Configuração")
     api_key = st.secrets.get("GEMINI_API_KEY", "") or st.text_input("Cole sua API Key do Gemini:", type="password")
-    data_referencia = st.date_input("Data base para validar certidões:", value=date.today())
+    hoje_br = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+    data_referencia = st.date_input(
+        "Data base para validar certidões:",
+        value=hoje_br,
+        format="DD/MM/YYYY"
+    )
 
 # Área de Upload em duas colunas
 col1, col2 = st.columns(2)
