@@ -1,9 +1,9 @@
+import os
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import streamlit as st
-import streamlit.components.v1 as components
 from google import genai
 from google.genai import types
 from google.genai.errors import APIError
@@ -14,10 +14,21 @@ st.set_page_config(page_title="Auditor de Credenciamento", page_icon="⚖️", l
 st.title("⚖️ Auditor de Documentos para Licitação")
 st.markdown("Faça o upload do **Edital** e de **um ou mais PDFs da Empresa** para gerar o parecer de habilitação.")
 
-# Barra lateral para a Chave de API (ou configurada nos Secrets da nuvem)
+
+def obter_api_key() -> str:
+    try:
+        if "GEMINI_API_KEY" in st.secrets and st.secrets["GEMINI_API_KEY"]:
+            return str(st.secrets["GEMINI_API_KEY"]).strip()
+    except Exception:
+        pass
+    return os.environ.get("GEMINI_API_KEY", "").strip()
+
+
+api_key = obter_api_key()
+
+# Barra lateral para data base
 with st.sidebar:
     st.header("Configuração")
-    api_key = st.secrets.get("GEMINI_API_KEY", "") or st.text_input("Cole sua API Key do Gemini:", type="password")
     hoje_br = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
     data_referencia = st.date_input(
         "Data base para validar certidões:",
@@ -41,7 +52,7 @@ with col2:
 # Botão de execução
 if st.button("🔍 Analisar Documentação e Gerar Parecer", type="primary", use_container_width=True):
     if not api_key:
-        st.error("Por favor, insira a chave de API do Google Gemini na barra lateral.")
+        st.error("Chave de API não configurada no servidor (`GEMINI_API_KEY` nos Secrets).")
     elif not edital_pdf or not docs_pdfs:
         st.warning("Por favor, anexe o PDF do Edital e pelo menos um PDF dos Documentos da empresa.")
     else:
@@ -70,18 +81,18 @@ if st.button("🔍 Analisar Documentação e Gerar Parecer", type="primary", use
                 Analise todos os arquivos PDF enviados como "DOCUMENTO DA EMPRESA" confrontando-os rigorosamente com as exigências do "DOCUMENTO DE REFERÊNCIA — EDITAL DA LICITAÇÃO". Considere o conjunto de arquivos da empresa como um único pacote de habilitação/credenciamento, identificando em qual arquivo cada documento/informação se encontra.
 
                 INSTRUÇÕES DE AUDITORIA:
-1. Identifique a empresa (Razão Social e CNPJ) e verifique se há consistência em todos os arquivos enviados.
-2. Confira cada certidão apresentada (Federal, Estadual, Municipal, FGTS, Trabalhista, Falência/Concordata) verificando data de emissão, prazo de validade e conformidade com o edital.
-3. Verifique a habilitação jurídica (Contrato Social/Estatuto, alterações, documentos dos sócios/representantes).
-4. Caso o edital exija qualificação econômico-financeira, extraia os valores do Balanço Patrimonial / demonstrações e calcule os índices exigidos (ex: Liquidez Corrente, Liquidez Geral, Solvência Geral), informando a fórmula e o resultado.
-5. Verifique a qualificação técnica (atestados, declarações, registros) conforme o objeto do edital.
+                1. Identifique a empresa (Razão Social e CNPJ) e verifique se há consistência em todos os arquivos enviados.
+                2. Confira cada certidão apresentada (Federal, Estadual, Municipal, FGTS, Trabalhista, Falência/Concordata) verificando data de emissão, prazo de validade e conformidade com o edital.
+                3. Verifique a habilitação jurídica (Contrato Social/Estatuto, alterações, documentos dos sócios/representantes).
+                4. Caso o edital exija qualificação econômico-financeira, extraia os valores do Balanço Patrimonial / demonstrações e calcule os índices exigidos (ex: Liquidez Corrente, Liquidez Geral, Solvência Geral), informando a fórmula e o resultado.
+                5. Verifique a qualificação técnica (atestados, declarações, registros) conforme o objeto do edital.
 
                 FORMATO DO PARECER TÉCNICO:
                 Organize a saída de forma limpa e formal para impressão:
-- **Cabeçalho do Parecer:** Objeto resumido do edital, Empresa analisada, CNPJ e relação dos arquivos avaliados.
-- **Tabela Resumo de Conformidade:** Colunas [Documento / Exigência | Arquivo de Origem | Status (CONFORME / IRREGULAR / AUSENTE) | Observação e Validade].
-- **Análise Detalhada e Cálculos:** Detalhamento técnico de cada ponto crítico, arquivo avaliado ou cálculo contábil realizado.
-- **Conclusão / Veredito:** Parecer final claro indicando se a documentação está APTA ou INAPTA para o credenciamento, listando eventuais pendências ou diligências.
+                - **Cabeçalho do Parecer:** Objeto resumido do edital, Empresa analisada, CNPJ e relação dos arquivos avaliados.
+                - **Tabela Resumo de Conformidade:** Colunas [Documento / Exigência | Arquivo de Origem | Status (CONFORME / IRREGULAR / AUSENTE) | Observação e Validade].
+                - **Análise Detalhada e Cálculos:** Detalhamento técnico de cada ponto crítico, arquivo avaliado ou cálculo contábil realizado.
+                - **Conclusão / Veredito:** Parecer final claro indicando se a documentação está APTA ou INAPTA para o credenciamento, listando eventuais pendências ou diligências.
                 """
 
                 contents.append(prompt)
@@ -129,8 +140,8 @@ if st.button("🔍 Analisar Documentação e Gerar Parecer", type="primary", use
 if "parecer" in st.session_state:
     st.divider()
 
-    components.html(
-        """
+    st.iframe(
+        html="""
         <script>
         (function() {
             const parentDoc = window.parent.document;
