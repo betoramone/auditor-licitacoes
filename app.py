@@ -1,4 +1,5 @@
 import os
+import re
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -22,6 +23,20 @@ def obter_api_key() -> str:
     except Exception:
         pass
     return os.environ.get("GEMINI_API_KEY", "").strip()
+
+
+def eh_cota_diaria_esgotada(erro: APIError) -> bool:
+    texto = str(erro).lower()
+    return (
+        "perday" in texto
+        or "requests per day" in texto
+        or "per day limit exceeded" in texto
+    )
+
+
+def extrair_tempo_espera(erro: APIError) -> str:
+    match = re.search(r"retry in ([0-9]+(?:\.[0-9]+)?[hms]+)", str(erro), re.IGNORECASE)
+    return match.group(1) if match else ""
 
 
 api_key = obter_api_key()
@@ -129,11 +144,13 @@ if st.button("🔍 Analisar Documentação e Gerar Parecer", type="primary", use
                     raise RuntimeError("A resposta veio vazia.")
                 except APIError as e:
                     ultimo_erro = e
+                    if e.code == 429 and eh_cota_diaria_esgotada(e):
+                        raise
                     if e.code in (503, 429, 500):
                         espera = 3 * (tentativa + 1)
                         progress_bar.progress(
                             min(progresso_tentativa, 85),
-                            text=f"Sobrecarga temporária ({e.code}). Aguardando {espera}s para nova tentativa..."
+                            text=f"Instabilidade temporária ({e.code}). Aguardando {espera}s para nova tentativa..."
                         )
                         status_box.warning(
                             f"Instabilidade/sobrecarga no {modelo_ativo} (código {e.code}). "
@@ -149,6 +166,19 @@ if st.button("🔍 Analisar Documentação e Gerar Parecer", type="primary", use
             progress_bar.progress(100, text="Parecer técnico gerado com sucesso!")
             status_box.empty()
             st.session_state["parecer"] = response.text
+
+        except APIError as e:
+            progress_bar.empty()
+            status_box.empty()
+            if e.code == 429 and eh_cota_diaria_esgotada(e):
+                tempo = extrair_tempo_espera(e)
+                aviso_tempo = f" Tempo estimado para reset: **{tempo}**." if tempo else ""
+                st.error(
+                    f"Limite diário de requisições do plano gratuito atingido para o modelo `gemini-3.8-flash`. "
+                    f"O *retry* foi interrompido para não desperdiçar tentativas.{aviso_tempo}"
+                )
+            else:
+                st.error(f"Erro na API do Gemini ao processar os documentos: {e}")
 
         except Exception as e:
             progress_bar.empty()
