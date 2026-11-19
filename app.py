@@ -124,7 +124,7 @@ with st.sidebar:
 
     modelos_padrao = [
         "gemini-3.8-flash",
-        "gemini-2.5-flash",
+       # "gemini-2.5-flash",
         "gemini-2.5-flash-lite",
     ]
     modelos_selecionados = st.multiselect(
