@@ -125,13 +125,54 @@ if st.button("🔍 Analisar Documentação e Gerar Parecer", type="primary", use
                 status_box.empty()
                 st.error(f"Erro ao processar os documentos: {e}")
 
-# Exibição do Parecer e Botão de Impressão
+# Exibição do Parecer e Botão de Impressão (imprimindo apenas o relatório)
 if "parecer" in st.session_state:
     st.divider()
-    st.subheader("📄 Parecer Técnico de Habilitação")
 
     components.html(
         """
+        <script>
+        (function() {
+            const parentDoc = window.parent.document;
+            if (!parentDoc.getElementById("estilo-impressao-relatorio")) {
+                const style = parentDoc.createElement("style");
+                style.id = "estilo-impressao-relatorio";
+                style.innerHTML = `
+                    @media print {
+                        body * {
+                            visibility: hidden !important;
+                        }
+                        #area-parecer-impressao, #area-parecer-impressao * {
+                            visibility: visible !important;
+                        }
+                        #area-parecer-impressao {
+                            position: absolute !important;
+                            left: 0 !important;
+                            top: 0 !important;
+                            width: 100% !important;
+                            margin: 0 !important;
+                            padding: 16px !important;
+                            color: #000000 !important;
+                            background: #ffffff !important;
+                        }
+                        #area-parecer-impressao table {
+                            width: 100% !important;
+                            border-collapse: collapse !important;
+                        }
+                        #area-parecer-impressao th, #area-parecer-impressao td {
+                            border: 1px solid #666 !important;
+                            padding: 6px 8px !important;
+                            color: #000000 !important;
+                        }
+                        .no-print {
+                            display: none !important;
+                        }
+                    }
+                `;
+                parentDoc.head.appendChild(style);
+            }
+        })();
+        </script>
         <button onclick="window.parent.print()" style="
             background-color: #0e1117;
             color: white;
@@ -148,4 +189,7 @@ if "parecer" in st.session_state:
         height=55
     )
 
+    st.markdown('<div id="area-parecer-impressao">', unsafe_allow_html=True)
+    st.subheader("📄 Parecer Técnico de Habilitação")
     st.markdown(st.session_state["parecer"])
+    st.markdown("</div>", unsafe_allow_html=True)
