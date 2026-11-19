@@ -1,3 +1,4 @@
+import os
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -14,16 +15,21 @@ st.set_page_config(page_title="Auditor de Credenciamento", page_icon="⚖️", l
 st.title("⚖️ Auditor de Documentos para Licitação")
 st.markdown("Faça o upload do **Edital** e de **um ou mais PDFs da Empresa** para gerar o parecer de habilitação.")
 
-# Barra lateral para a Chave de API do Google Gemini, modelo e data base
+
+def obter_api_key() -> str:
+    try:
+        if "GEMINI_API_KEY" in st.secrets and st.secrets["GEMINI_API_KEY"]:
+            return str(st.secrets["GEMINI_API_KEY"]).strip()
+    except Exception:
+        pass
+    return os.environ.get("GEMINI_API_KEY", "").strip()
+
+
+api_key = obter_api_key()
+
+# Barra lateral apenas com modelo e data base
 with st.sidebar:
     st.header("Configuração")
-
-    chave_padrao = st.secrets.get("GEMINI_API_KEY", "")
-    api_key = st.text_input(
-        "API Key do Google Gemini:",
-        value=chave_padrao,
-        type="password"
-    )
 
     modelos_gemini = ["gemini-3.8-flash", "gemini-2.5-flash"]
     modelo = st.selectbox(
@@ -53,14 +59,14 @@ with col2:
 
 
 def analisar_com_gemini(
-    api_key: str,
+    chave_api: str,
     modelo_principal: str,
     edital_bytes: bytes,
     arquivos_empresa: list[tuple[str, bytes]],
     prompt: str,
     status_placeholder
 ) -> str:
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(api_key=chave_api)
 
     contents = [
         "DOCUMENTO DE REFERÊNCIA — EDITAL DA LICITAÇÃO:",
@@ -115,7 +121,7 @@ def analisar_com_gemini(
 # Botão de execução
 if st.button("🔍 Analisar Documentação e Gerar Parecer", type="primary", use_container_width=True):
     if not api_key:
-        st.error("Por favor, informe a chave de API do Google Gemini na barra lateral.")
+        st.error("Chave de API não configurada no servidor (`GEMINI_API_KEY` nos Secrets).")
     elif not edital_pdf or not docs_pdfs:
         st.warning("Por favor, anexe o PDF do Edital e pelo menos um PDF dos Documentos da empresa.")
     else:
