@@ -1,9 +1,12 @@
-import streamlit as st
-from google import genai
-from google.genai import types
-import streamlit.components.v1 as components
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+import streamlit as st
+import streamlit.components.v1 as components
+from google import genai
+from google.genai import types
+from google.genai.errors import APIError as GeminiAPIError
 
 # Configuração da página
 st.set_page_config(page_title="Auditor de Credenciamento", page_icon="⚖️", layout="wide")
@@ -11,10 +14,23 @@ st.set_page_config(page_title="Auditor de Credenciamento", page_icon="⚖️", l
 st.title("⚖️ Auditor de Documentos para Licitação")
 st.markdown("Faça o upload do **Edital** e de **um ou mais PDFs da Empresa** para gerar o parecer de habilitação.")
 
-# Barra lateral para a Chave de API (ou configurada nos Secrets da nuvem)
+# Barra lateral para a Chave de API do Google Gemini, modelo e data base
 with st.sidebar:
     st.header("Configuração")
-    api_key = st.secrets.get("GEMINI_API_KEY", "") or st.text_input("Cole sua API Key do Gemini:", type="password")
+
+    chave_padrao = st.secrets.get("GEMINI_API_KEY", "")
+    api_key = st.text_input(
+        "API Key do Google Gemini:",
+        value=chave_padrao,
+        type="password"
+    )
+
+    modelos_gemini = ["gemini-3.8-flash", "gemini-2.5-flash"]
+    modelo = st.selectbox(
+        "Modelo Gemini principal:",
+        options=modelos_gemini
+    )
+
     hoje_br = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
     data_referencia = st.date_input(
         "Data base para validar certidões:",
@@ -35,28 +51,79 @@ with col2:
         accept_multiple_files=True
     )
 
+
+def analisar_com_gemini(
+    api_key: str,
+    modelo_principal: str,
+    edital_bytes: bytes,
+    arquivos_empresa: list[tuple[str, bytes]],
+    prompt: str,
+    status_placeholder
+) -> str:
+    client = genai.Client(api_key=api_key)
+
+    contents = [
+        "DOCUMENTO DE REFERÊNCIA — EDITAL DA LICITAÇÃO:",
+        types.Part.from_bytes(data=edital_bytes, mime_type="application/pdf"),
+    ]
+
+    for nome_arquivo, dados_bytes in arquivos_empresa:
+        contents.append(f"DOCUMENTO DA EMPRESA — ARQUIVO: {nome_arquivo}")
+        contents.append(types.Part.from_bytes(data=dados_bytes, mime_type="application/pdf"))
+
+    contents.append(prompt)
+
+    ordem_modelos = [modelo_principal]
+    for m in ["gemini-3.8-flash", "gemini-2.5-flash"]:
+        if m not in ordem_modelos:
+            ordem_modelos.append(m)
+
+    ultimo_erro = None
+    for idx_m, nome_modelo in enumerate(ordem_modelos):
+        for tentativa in range(3):
+            try:
+                status_placeholder.info(
+                    f"Consultando Google Gemini ({nome_modelo}) — tentativa {tentativa + 1} de 3..."
+                )
+                response = client.models.generate_content(
+                    model=nome_modelo,
+                    contents=contents
+                )
+                if response.text:
+                    return response.text
+                raise RuntimeError("O modelo retornou uma resposta vazia.")
+            except GeminiAPIError as e:
+                ultimo_erro = e
+                if e.code in (503, 429, 500):
+                    espera = 3 * (tentativa + 1)
+                    status_placeholder.warning(
+                        f"Modelo {nome_modelo} instável/ocupado (código {e.code}). "
+                        f"Nova tentativa em {espera}s..."
+                    )
+                    time.sleep(espera)
+                    continue
+                raise
+
+        if idx_m < len(ordem_modelos) - 1:
+            status_placeholder.warning(
+                f"Sem resposta após tentativas no {nome_modelo}. Tentando modelo alternativo..."
+            )
+
+    raise ultimo_erro or RuntimeError("Não foi possível obter resposta do Google Gemini após tentativas.")
+
+
 # Botão de execução
 if st.button("🔍 Analisar Documentação e Gerar Parecer", type="primary", use_container_width=True):
     if not api_key:
-        st.error("Por favor, insira a chave de API do Google Gemini na barra lateral.")
+        st.error("Por favor, informe a chave de API do Google Gemini na barra lateral.")
     elif not edital_pdf or not docs_pdfs:
         st.warning("Por favor, anexe o PDF do Edital e pelo menos um PDF dos Documentos da empresa.")
     else:
-        with st.spinner("Lendo o edital, conferindo documentos e calculando índices... Aguarde alguns segundos."):
+        status_placeholder = st.empty()
+        with st.spinner("Processando documentos e gerando parecer..."):
             try:
-                client = genai.Client(api_key=api_key)
-
-                # Monta a lista de conteúdos: primeiro o edital, depois cada documento da empresa
-                contents = [
-                    "DOCUMENTO DE REFERÊNCIA — EDITAL DA LICITAÇÃO:",
-                    types.Part.from_bytes(data=edital_pdf.getvalue(), mime_type="application/pdf"),
-                ]
-
-                for arquivo in docs_pdfs:
-                    contents.append(f"DOCUMENTO DA EMPRESA — ARQUIVO: {arquivo.name}")
-                    contents.append(
-                        types.Part.from_bytes(data=arquivo.getvalue(), mime_type="application/pdf")
-                    )
+                edital_bytes = edital_pdf.getvalue()
+                arquivos_empresa = [(arq.name, arq.getvalue()) for arq in docs_pdfs]
 
                 prompt = f"""
                 Você é um analista sênior de licitações públicas especialista na Lei nº 14.133/2021.
@@ -80,16 +147,15 @@ if st.button("🔍 Analisar Documentação e Gerar Parecer", type="primary", use
                 - **Conclusão / Veredito:** Parecer final claro indicando se a documentação está APTA ou INAPTA para o credenciamento, listando eventuais pendências ou diligências.
                 """
 
-                contents.append(prompt)
-
-                response = client.models.generate_content(
-                    model="gemini-3.8-flash",
-                    contents=contents
+                parecer_texto = analisar_com_gemini(
+                    api_key, modelo, edital_bytes, arquivos_empresa, prompt, status_placeholder
                 )
 
-                st.session_state["parecer"] = response.text
+                status_placeholder.empty()
+                st.session_state["parecer"] = parecer_texto
 
             except Exception as e:
+                status_placeholder.empty()
                 st.error(f"Erro ao processar os documentos: {e}")
 
 # Exibição do Parecer e Botão de Impressão
