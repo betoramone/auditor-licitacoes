@@ -57,84 +57,103 @@ if st.button("🔍 Analisar Documentação e Gerar Parecer", type="primary", use
         st.warning("Por favor, anexe o PDF do Edital e pelo menos um PDF dos Documentos da empresa.")
     else:
         status_box = st.empty()
-        with st.spinner("Lendo o edital, conferindo documentos e calculando índices... Aguarde alguns segundos."):
-            try:
-                client = genai.Client(api_key=api_key)
+        progress_bar = st.progress(0, text="Preparando documentos para auditoria...")
 
-                # Monta a lista de conteúdos: primeiro o edital, depois cada documento da empresa
-                contents = [
-                    "DOCUMENTO DE REFERÊNCIA — EDITAL DA LICITAÇÃO:",
-                    types.Part.from_bytes(data=edital_pdf.getvalue(), mime_type="application/pdf"),
-                ]
+        try:
+            progress_bar.progress(15, text="Carregando edital e documentos da empresa...")
+            client = genai.Client(api_key=api_key)
 
-                for arquivo in docs_pdfs:
-                    contents.append(f"DOCUMENTO DA EMPRESA — ARQUIVO: {arquivo.name}")
-                    contents.append(
-                        types.Part.from_bytes(data=arquivo.getvalue(), mime_type="application/pdf")
+            # Monta a lista de conteúdos: primeiro o edital, depois cada documento da empresa
+            contents = [
+                "DOCUMENTO DE REFERÊNCIA — EDITAL DA LICITAÇÃO:",
+                types.Part.from_bytes(data=edital_pdf.getvalue(), mime_type="application/pdf"),
+            ]
+
+            total_docs = len(docs_pdfs)
+            for idx, arquivo in enumerate(docs_pdfs, start=1):
+                contents.append(f"DOCUMENTO DA EMPRESA — ARQUIVO: {arquivo.name}")
+                contents.append(
+                    types.Part.from_bytes(data=arquivo.getvalue(), mime_type="application/pdf")
+                )
+                pct_docs = 15 + int((idx / max(total_docs, 1)) * 20)
+                progress_bar.progress(
+                    min(pct_docs, 35),
+                    text=f"Anexando documento {idx} de {total_docs}: {arquivo.name}..."
+                )
+
+            prompt = f"""
+            Você é um analista sênior de licitações públicas especialista na Lei nº 14.133/2021.
+            Data de referência para análise de validade das certidões: {data_referencia.strftime('%d/%m/%Y')}.
+
+            TAREFA:
+            Analise todos os arquivos PDF enviados como "DOCUMENTO DA EMPRESA" confrontando-os rigorosamente com as exigências do "DOCUMENTO DE REFERÊNCIA — EDITAL DA LICITAÇÃO". Considere o conjunto de arquivos da empresa como um único pacote de habilitação/credenciamento, identificando em qual arquivo cada documento/informação se encontra.
+
+            INSTRUÇÕES DE AUDITORIA:
+            1. Identifique a empresa (Razão Social e CNPJ) e verifique se há consistência em todos os arquivos enviados.
+            2. Confira cada certidão apresentada (Federal, Estadual, Municipal, FGTS, Trabalhista, Falência/Concordata) verificando data de emissão, prazo de validade e conformidade com o edital.
+            3. Verifique a habilitação jurídica (Contrato Social/Estatuto, alterações, documentos dos sócios/representantes).
+            4. Caso o edital exija qualificação econômico-financeira, extraia os valores do Balanço Patrimonial / demonstrações e calcule os índices exigidos (ex: Liquidez Corrente, Liquidez Geral, Solvência Geral), informando a fórmula e o resultado.
+            5. Verifique a qualificação técnica (atestados, declarações, registros) conforme o objeto do edital.
+
+            FORMATO DO PARECER TÉCNICO:
+            Organize a saída de forma limpa e formal para impressão:
+            - **Cabeçalho do Parecer:** Objeto resumido do edital, Empresa analisada, CNPJ e relação dos arquivos avaliados.
+            - **Tabela Resumo de Conformidade:** Colunas [Documento / Exigência | Arquivo de Origem | Status (CONFORME / IRREGULAR / AUSENTE) | Observação e Validade].
+            - **Análise Detalhada e Cálculos:** Detalhamento técnico de cada ponto crítico, arquivo avaliado ou cálculo contábil realizado.
+            - **Conclusão / Veredito:** Parecer final claro indicando se a documentação está APTA ou INAPTA para o credenciamento, listando eventuais pendências ou diligências.
+            """
+
+            contents.append(prompt)
+
+            modelo_ativo = "gemini-3.8-flash"
+            response = None
+            ultimo_erro = None
+            max_tentativas = 3
+
+            for tentativa in range(max_tentativas):
+                progresso_tentativa = 40 + (tentativa * 15)
+                try:
+                    progress_bar.progress(
+                        min(progresso_tentativa, 85),
+                        text=f"Analisando documentação com {modelo_ativo} (tentativa {tentativa + 1} de {max_tentativas})..."
                     )
-
-                prompt = f"""
-                Você é um analista sênior de licitações públicas especialista na Lei nº 14.133/2021.
-                Data de referência para análise de validade das certidões: {data_referencia.strftime('%d/%m/%Y')}.
-
-                TAREFA:
-                Analise todos os arquivos PDF enviados como "DOCUMENTO DA EMPRESA" confrontando-os rigorosamente com as exigências do "DOCUMENTO DE REFERÊNCIA — EDITAL DA LICITAÇÃO". Considere o conjunto de arquivos da empresa como um único pacote de habilitação/credenciamento, identificando em qual arquivo cada documento/informação se encontra.
-
-                INSTRUÇÕES DE AUDITORIA:
-                1. Identifique a empresa (Razão Social e CNPJ) e verifique se há consistência em todos os arquivos enviados.
-                2. Confira cada certidão apresentada (Federal, Estadual, Municipal, FGTS, Trabalhista, Falência/Concordata) verificando data de emissão, prazo de validade e conformidade com o edital.
-                3. Verifique a habilitação jurídica (Contrato Social/Estatuto, alterações, documentos dos sócios/representantes).
-                4. Caso o edital exija qualificação econômico-financeira, extraia os valores do Balanço Patrimonial / demonstrações e calcule os índices exigidos (ex: Liquidez Corrente, Liquidez Geral, Solvência Geral), informando a fórmula e o resultado.
-                5. Verifique a qualificação técnica (atestados, declarações, registros) conforme o objeto do edital.
-
-                FORMATO DO PARECER TÉCNICO:
-                Organize a saída de forma limpa e formal para impressão:
-                - **Cabeçalho do Parecer:** Objeto resumido do edital, Empresa analisada, CNPJ e relação dos arquivos avaliados.
-                - **Tabela Resumo de Conformidade:** Colunas [Documento / Exigência | Arquivo de Origem | Status (CONFORME / IRREGULAR / AUSENTE) | Observação e Validade].
-                - **Análise Detalhada e Cálculos:** Detalhamento técnico de cada ponto crítico, arquivo avaliado ou cálculo contábil realizado.
-                - **Conclusão / Veredito:** Parecer final claro indicando se a documentação está APTA ou INAPTA para o credenciamento, listando eventuais pendências ou diligências.
-                """
-
-                contents.append(prompt)
-
-                modelo_ativo = "gemini-3.8-flash"
-                response = None
-                ultimo_erro = None
-
-                for tentativa in range(3):
-                    try:
-                        status_box.info(
-                            f"Consultando {modelo_ativo} (tentativa {tentativa + 1} de 3)..."
+                    status_box.info(
+                        f"Consultando {modelo_ativo} (tentativa {tentativa + 1} de {max_tentativas})..."
+                    )
+                    response = client.models.generate_content(
+                        model=modelo_ativo,
+                        contents=contents
+                    )
+                    if response.text:
+                        break
+                    raise RuntimeError("A resposta veio vazia.")
+                except APIError as e:
+                    ultimo_erro = e
+                    if e.code in (503, 429, 500):
+                        espera = 3 * (tentativa + 1)
+                        progress_bar.progress(
+                            min(progresso_tentativa, 85),
+                            text=f"Sobrecarga temporária ({e.code}). Aguardando {espera}s para nova tentativa..."
                         )
-                        response = client.models.generate_content(
-                            model=modelo_ativo,
-                            contents=contents
+                        status_box.warning(
+                            f"Instabilidade/sobrecarga no {modelo_ativo} (código {e.code}). "
+                            f"Tentando novamente em {espera}s..."
                         )
-                        if response.text:
-                            break
-                        raise RuntimeError("A resposta veio vazia.")
-                    except APIError as e:
-                        ultimo_erro = e
-                        if e.code in (503, 429, 500):
-                            espera = 3 * (tentativa + 1)
-                            status_box.warning(
-                                f"Instabilidade/sobrecarga no {modelo_ativo} (código {e.code}). "
-                                f"Tentando novamente em {espera}s..."
-                            )
-                            time.sleep(espera)
-                            continue
-                        raise
+                        time.sleep(espera)
+                        continue
+                    raise
 
-                status_box.empty()
+            if response is None or not response.text:
+                raise ultimo_erro or RuntimeError("Não foi possível obter resposta após as tentativas.")
 
-                if response is None or not response.text:
-                    raise ultimo_erro or RuntimeError("Não foi possível obter resposta após as tentativas.")
+            progress_bar.progress(100, text="Parecer técnico gerado com sucesso!")
+            status_box.empty()
+            st.session_state["parecer"] = response.text
 
-                st.session_state["parecer"] = response.text
-
-            except Exception as e:
-                status_box.empty()
-                st.error(f"Erro ao processar os documentos: {e}")
+        except Exception as e:
+            progress_bar.empty()
+            status_box.empty()
+            st.error(f"Erro ao processar os documentos: {e}")
 
 # Exibição do Parecer e Botão de Impressão (imprimindo apenas o relatório)
 if "parecer" in st.session_state:
